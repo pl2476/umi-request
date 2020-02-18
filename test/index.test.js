@@ -215,6 +215,27 @@ describe('test fetch:', () => {
       },
     });
     expect(response.wang).toBe('hou');
+    expect(response.hello).toBe('world3');
+
+    const reponse1 = await request(prefix('/test/queryParams'), {
+      params: new URLSearchParams('foo=hello'),
+    });
+
+    expect(reponse1.foo).toBe('hello');
+
+    const response2 = await request(prefix('/test/queryParams'), {
+      params: {
+        bar: 'woo',
+      },
+      paramsSerializer: params => `bar=${params.bar}&car=pengpeng`,
+    });
+    expect(response2.bar).toBe('woo');
+    expect(response2.car).toBe('pengpeng');
+
+    const response3 = await request(prefix('/test/queryParams'), {
+      params: 'stringparams',
+    });
+    expect(response3[0]).toBe('stringparams');
   }, 5000);
 
   // 测试缓存
@@ -296,6 +317,37 @@ describe('test fetch:', () => {
     expect(response.response.useCache).toBe(false);
     expect(response.data.defaultParams).toBe('true');
   }, 10000);
+
+  it('test validate cache', async () => {
+    server.post('/test/validate/cache', (req, res) => {
+      writeData(req.query, res);
+    });
+    server.get('/test/validate/cache', (req, res) => {
+      writeData(req.query, res);
+    });
+    const extendRequest = extend({
+      maxCache: 2,
+      prefix: server.url,
+      headers: { Connection: 'keep-alive' },
+      params: { defaultParams: true },
+      validateCache: (url, options) => {
+        const { method = 'get' } = options;
+        if (method.toLowerCase() === 'post') {
+          return true;
+        }
+        return false;
+      },
+      getResponse: true,
+      useCache: true,
+    });
+    let response = await extendRequest('/test/validate/cache', { method: 'post' });
+    response = await extendRequest('/test/validate/cache', { method: 'post' });
+
+    expect(response.response.useCache).toBe(true);
+
+    response = await extendRequest('/test/validate/cache', { method: 'get' });
+    expect(response.response.useCache).toBe(false);
+  });
 
   it('test extends', async () => {
     server.get('/test/method', (req, res) => {
@@ -450,6 +502,37 @@ describe('test fetch:', () => {
     });
     expect(response.data[0]).toBe('1');
     expect(response.data[1]).toBe('2');
+  });
+});
+
+describe('test http error', () => {
+  let server;
+
+  beforeAll(async () => {
+    server = await createTestServer();
+  });
+
+  afterAll(() => {
+    server.close();
+  });
+
+  it('error handler should return request in error object', async done => {
+    expect.assertions(3);
+    server.get('/api/error', (req, res) => {
+      res.setHeader('access-control-allow-origin', '*');
+      res.status(500);
+      res.send({ errorMessage: 'server error' });
+    });
+
+    try {
+      let response = await request(`${server.url}/api/error`, { hello: 'world' });
+    } catch (e) {
+      const { response, message, data, request } = e;
+      expect(response.status).toBe(500);
+      expect(request.url).toBe(`${server.url}/api/error`);
+      expect(request.options.hello).toBe('world');
+      done();
+    }
   });
 });
 

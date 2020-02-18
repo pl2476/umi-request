@@ -4,8 +4,8 @@ import compose from './compose';
 class Onion {
   constructor(defaultMiddlewares) {
     if (!Array.isArray(defaultMiddlewares)) throw new TypeError('Default middlewares must be an array!');
-
-    this.middlewares = [...defaultMiddlewares];
+    this.defaultMiddlewares = [...defaultMiddlewares];
+    this.middlewares = [];
   }
 
   static globalMiddlewares = []; // 全局中间件
@@ -13,24 +13,27 @@ class Onion {
   static coreMiddlewares = []; // 内核中间件
   static defaultCoreMiddlewaresLength = 0; // 内置内核中间件长度
 
-  use(newMiddleware, opts = { global: false, core: false }) {
+  use(newMiddleware, opts = { global: false, core: false, defaultInstance: false }) {
     let core = false;
     let global = false;
+    let defaultInstance = false;
+
     if (typeof opts === 'number') {
-      console.warn(
-        'use() options should be object, number property would be deprecated in future，please update use() options to "{ core: true }".'
-      );
+      if (process && process.env && process.env.NODE_ENV === 'development') {
+        console.warn(
+          'use() options should be object, number property would be deprecated in future，please update use() options to "{ core: true }".'
+        );
+      }
       core = true;
       global = false;
     } else if (typeof opts === 'object' && opts) {
-      // index = opts.index || 0;
       global = opts.global || false;
       core = opts.core || false;
+      defaultInstance = opts.defaultInstance || false;
     }
 
     // 全局中间件
     if (global) {
-      // Onion.globalMiddlewares.push(newMiddleware);
       Onion.globalMiddlewares.splice(
         Onion.globalMiddlewares.length - Onion.defaultGlobalMiddlewaresLength,
         0,
@@ -44,12 +47,23 @@ class Onion {
       return;
     }
 
+    // 默认实例中间件，供开发者使用
+    if (defaultInstance) {
+      this.defaultMiddlewares.push(newMiddleware);
+      return;
+    }
+
     // 实例中间件
     this.middlewares.push(newMiddleware);
   }
 
   execute(params = null) {
-    const fn = compose([...this.middlewares, ...Onion.globalMiddlewares, ...Onion.coreMiddlewares]);
+    const fn = compose([
+      ...this.middlewares,
+      ...this.defaultMiddlewares,
+      ...Onion.globalMiddlewares,
+      ...Onion.coreMiddlewares,
+    ]);
     return fn(params);
   }
 }

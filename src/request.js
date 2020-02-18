@@ -2,24 +2,14 @@ import Core from './core';
 import Cancel from './cancel/cancel';
 import CancelToken from './cancel/cancelToken';
 import isCancel from './cancel/isCancel';
+import Oinon from './onion';
+import { getParamObject, mergeRequestOptions } from './utils';
 
 // 通过 request 函数，在 core 之上再封装一层，提供原 umi/request 一致的 api，无缝升级
 const request = (initOptions = {}) => {
   const coreInstance = new Core(initOptions);
   const umiInstance = (url, options = {}) => {
-    const mergeOptions = {
-      ...initOptions,
-      ...options,
-      headers: {
-        ...initOptions.headers,
-        ...options.headers,
-      },
-      params: {
-        ...initOptions.params,
-        ...options.params,
-      },
-      method: (options.method || initOptions.method || 'get').toLowerCase(),
-    };
+    const mergeOptions = mergeRequestOptions(coreInstance.initOptions, options);
     return coreInstance.request(url, mergeOptions);
   };
 
@@ -30,15 +20,15 @@ const request = (initOptions = {}) => {
   // 拦截器
   umiInstance.interceptors = {
     request: {
-      use: Core.requestUse,
+      use: Core.requestUse.bind(coreInstance),
     },
     response: {
-      use: Core.responseUse,
+      use: Core.responseUse.bind(coreInstance),
     },
   };
 
   // 请求语法糖： reguest.get request.post ……
-  const METHODS = ['get', 'post', 'delete', 'put', 'rpc', 'patch'];
+  const METHODS = ['get', 'post', 'delete', 'put', 'patch', 'head', 'options', 'rpc'];
   METHODS.forEach(method => {
     umiInstance[method] = (url, options) => umiInstance(url, { ...options, method });
   });
@@ -46,6 +36,16 @@ const request = (initOptions = {}) => {
   umiInstance.Cancel = Cancel;
   umiInstance.CancelToken = CancelToken;
   umiInstance.isCancel = isCancel;
+
+  umiInstance.extendOptions = coreInstance.extendOptions.bind(coreInstance);
+
+  // 暴露各个实例的中间件，供开发者自由组合
+  umiInstance.middlewares = {
+    instance: coreInstance.onion.middlewares,
+    defaultInstance: coreInstance.onion.defaultMiddlewares,
+    global: Oinon.globalMiddlewares,
+    core: Oinon.coreMiddlewares,
+  };
 
   return umiInstance;
 };

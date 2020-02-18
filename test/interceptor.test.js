@@ -65,6 +65,78 @@ describe('interceptor', () => {
     }
   });
 
+  it('global and instance interceptor', async done => {
+    expect.assertions(6);
+    server.get('/test/global/interceptors', (req, res) => {
+      writeData(req.query, res);
+    });
+
+    // request global interceptors change request's url
+    request.interceptors.request.use((url, options) => {
+      return {
+        url: `${url}&isGlobal=yes`,
+        options: { ...options, interceptors: true },
+      };
+    });
+
+    request.interceptors.request.use(
+      (url, options) => {
+        return {
+          url: `${url}&instance=request`,
+          options: { ...options, interceptors: true },
+        };
+      },
+      { global: false }
+    );
+
+    request.interceptors.response.use(
+      (res, options) => {
+        res.headers.append('instance', 'yes request');
+        return res;
+      },
+      { global: false }
+    );
+
+    const clientA = extend();
+
+    // request instance self interceptors change request's url
+    clientA.interceptors.request.use(
+      (url, options) => {
+        return {
+          url: `${url}&instance=clientA`,
+          options,
+        };
+      },
+      { global: false }
+    );
+
+    // response instance self interceptor, change response's header
+    clientA.interceptors.response.use(
+      (res, options) => {
+        res.headers.append('instance', 'yes clientA');
+        return res;
+      },
+      { global: false }
+    );
+
+    const responseClientA = await clientA(prefix('/test/global/interceptors'), {
+      getResponse: true,
+    });
+
+    const response = await request(prefix('/test/global/interceptors'), {
+      getResponse: true,
+    });
+
+    expect(response.data.instance).toBe('request');
+    expect(response.data.isGlobal).toBe('yes');
+    expect(response.response.headers.get('instance')).toBe('yes request');
+
+    expect(responseClientA.data.instance).toBe('clientA');
+    expect(responseClientA.data.isGlobal).toBe('yes');
+    expect(responseClientA.response.headers.get('instance')).toBe('yes clientA');
+    done();
+  });
+
   it('invalid interceptor constructor', async done => {
     expect.assertions(2);
     try {
@@ -128,5 +200,94 @@ describe('interceptor', () => {
     });
     expect(data.promiseFoo).toBe('promiseFoo');
     done();
+  });
+
+  // reject in interceptor
+  it('throw error in response interceptor', async done => {
+    server.post('/test/reject/interceptor', (req, res) => {
+      writeData(req.body, res);
+    });
+
+    const req = extend({});
+
+    req.interceptors.response.use(
+      (response, options) => {
+        const { status, url } = response;
+        if (status === 200 && url.indexOf('/test/reject/interceptor')) {
+          throw Error('reject when response is 200 status');
+        }
+      },
+      { global: false }
+    );
+
+    try {
+      const data = await req(prefix('/test/reject/interceptor'), { method: 'post' });
+    } catch (e) {
+      expect(e.message).toBe('reject when response is 200 status');
+      done();
+    }
+  });
+
+  it('throw error in response interceptor', async done => {
+    server.post('/test/reject/responseerror', (req, res) => {
+      writeData(req.body, res);
+    });
+
+    class ResponseError extends Error {
+      constructor({ response, data }) {
+        super('x-error');
+
+        this.name = 'x-error';
+        this.type = 'x-type';
+        this.response = response;
+        this.data = data;
+      }
+    }
+
+    const req = extend({});
+
+    req.interceptors.response.use(
+      (response, options) => {
+        const { status, url } = response;
+        if (status === 200 && url.indexOf('/test/reject/responseerror')) {
+          throw new ResponseError({ response: response, data: { hello: 'world' } });
+        }
+      },
+      { global: false }
+    );
+
+    try {
+      const data = await req(prefix('/test/reject/responseerror'), { method: 'post' });
+    } catch (e) {
+      expect(e.name).toBe('x-error');
+      expect(e instanceof ResponseError).toBe(true);
+      expect(e.data.hello).toEqual('world');
+      done();
+    }
+  });
+
+  // clone response
+  it('should throw error when reponse.clone().json() result is fail', async done => {
+    server.post('/test/multiple/clone/response', (req, res) => {
+      writeData({ result: { success: false } }, res);
+    });
+    const req = extend({});
+    req.interceptors.response.use(
+      async (response, options) => {
+        const { result } = await response.clone().json();
+        if (result && result.success === false) {
+          throw Error('reject when response is fail');
+        }
+        return response;
+      },
+      { global: false }
+    );
+
+    try {
+      const data = await req(prefix('/test/multiple/clone/response'), { method: 'post' });
+    } catch (e) {
+      expect(e.message).toBe('reject when response is fail');
+      done();
+    }
   });
 });

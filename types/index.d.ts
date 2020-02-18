@@ -3,6 +3,11 @@ export interface ResponseError<D = any> extends Error {
   name: string;
   data: D;
   response: Response;
+  request: {
+    url: string;
+    options: RequestOptionsInit;
+  };
+  type: string;
 }
 /**
  * 增加的参数
@@ -23,7 +28,8 @@ export interface RequestOptionsInit extends RequestInit {
   charset?: 'utf8' | 'gbk';
   requestType?: 'json' | 'form';
   data?: any;
-  params?: object;
+  params?: object | URLSearchParams;
+  paramsSerializer?: (params: object) => string;
   responseType?: ResponseType;
   useCache?: boolean;
   ttl?: number;
@@ -35,6 +41,8 @@ export interface RequestOptionsInit extends RequestInit {
   parseResponse?: boolean;
   cancelToken?: CancelToken;
   getResponse?: boolean;
+  validateCache?: (url: string, options: RequestOptionsInit) => boolean;
+  __umiRequestCoreType__?: string;
 }
 
 export interface RequestOptionsWithoutResponse extends RequestOptionsInit {
@@ -69,7 +77,7 @@ export interface Context {
 export type ResponseInterceptor = (response: Response, options: RequestOptionsInit) => Response | Promise<Response>;
 
 export type OnionMiddleware = (ctx: Context, next: () => void) => void;
-export type OnionOptions = { global?: boolean; core?: boolean };
+export type OnionOptions = { global?: boolean; core?: boolean; defaultInstance?: boolean };
 
 export interface RequestMethod<R = false> {
   <T = any>(url: string, options: RequestOptionsWithResponse): Promise<RequestResponse<T>>;
@@ -80,13 +88,15 @@ export interface RequestMethod<R = false> {
   delete: RequestMethod<R>;
   put: RequestMethod<R>;
   patch: RequestMethod<R>;
+  head: RequestMethod<R>;
+  options: RequestMethod<R>;
   rpc: RequestMethod<R>;
   interceptors: {
     request: {
-      use: (handler: RequestInterceptor) => void;
+      use: (handler: RequestInterceptor, options?: OnionOptions) => void;
     };
     response: {
-      use: (handler: ResponseInterceptor) => void;
+      use: (handler: ResponseInterceptor, options?: OnionOptions) => void;
     };
   };
   use: (handler: OnionMiddleware, options?: OnionOptions) => void;
@@ -94,6 +104,13 @@ export interface RequestMethod<R = false> {
   Cancel: CancelStatic;
   CancelToken: CancelTokenStatic;
   isCancel(value: any): boolean;
+  extendOptions: (options: RequestOptionsInit) => void;
+  middlewares: {
+    instance: OnionMiddleware[];
+    defaultInstance: OnionMiddleware[];
+    global: OnionMiddleware[];
+    core: OnionMiddleware[];
+  };
 }
 
 export interface ExtendOnlyOptions {
@@ -143,5 +160,7 @@ export interface CancelTokenSource {
 }
 
 declare var request: RequestMethod;
+
+export declare var fetch: RequestMethod;
 
 export default request;

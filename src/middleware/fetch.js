@@ -1,15 +1,35 @@
 import 'isomorphic-fetch';
 import { timeout2Throw, cancel2Throw, getEnv } from '../utils';
 
+// 是否已经警告过
+let warnedCoreType = false;
+
+// 默认缓存判断，开放缓存判断给非 get 请求使用
+function __defaultValidateCache(url, options) {
+  const { method = 'get' } = options;
+  return method.toLowerCase() === 'get';
+}
+
 export default function fetchMiddleware(ctx, next) {
   if (!ctx) return next();
   const { req: { options = {}, url = '' } = {}, cache, responseInterceptors } = ctx;
-  const { timeout = 0, __umiRequestCoreType__ = 'normal', useCache = false, method = 'get', params, ttl } = options;
+  const {
+    timeout = 0,
+    __umiRequestCoreType__ = 'normal',
+    useCache = false,
+    method = 'get',
+    params,
+    ttl,
+    validateCache = __defaultValidateCache,
+  } = options;
 
   if (__umiRequestCoreType__ !== 'normal') {
-    console.warn(
-      '__umiRequestCoreType__ is a internal params that use in umi-request, change its value would affect the behavior of request! It only use when you want to extend the request core'
-    );
+    if (process && process.env && process.env.NODE_ENV === 'development' && warnedCoreType === false) {
+      warnedCoreType = true;
+      console.warn(
+        '__umiRequestCoreType__ is a internal property that use in umi-request, change its value would affect the behavior of request! It only use when you want to extend or use request core.'
+      );
+    }
     return next();
   }
 
@@ -21,11 +41,12 @@ export default function fetchMiddleware(ctx, next) {
 
   // 从缓存池检查是否有缓存数据
   const isBrowser = getEnv() === 'BROWSER';
-  const needCache = method.toLowerCase() === 'get' && useCache && isBrowser;
+  const needCache = validateCache(url, options) && useCache && isBrowser;
   if (needCache) {
     let responseCache = cache.get({
       url,
       params,
+      method,
     });
     if (responseCache) {
       responseCache = responseCache.clone();
@@ -38,14 +59,18 @@ export default function fetchMiddleware(ctx, next) {
   let response;
   // 超时处理、取消请求处理
   if (timeout > 0) {
-    response = Promise.race([cancel2Throw(options, ctx), adapter(url, options), timeout2Throw(timeout)]);
+    response = Promise.race([cancel2Throw(options, ctx), adapter(url, options), timeout2Throw(timeout, ctx.req)]);
   } else {
     response = Promise.race([cancel2Throw(options, ctx), adapter(url, options)]);
   }
 
   // 兼容老版本 response.interceptor
   responseInterceptors.forEach(handler => {
-    response = response.then(res => handler(res, options));
+    response = response.then(res => {
+      // Fix multiple clones not working, issue: https://github.com/github/fetch/issues/504
+      let clonedRes = typeof res.clone === 'function' ? res.clone() : res;
+      return handler(clonedRes, options);
+    });
   });
 
   return response.then(res => {
@@ -54,7 +79,7 @@ export default function fetchMiddleware(ctx, next) {
       if (res.status === 200) {
         const copy = res.clone();
         copy.useCache = true;
-        cache.set({ url, params }, copy, ttl);
+        cache.set({ url, params, method }, copy, ttl);
       }
     }
 
